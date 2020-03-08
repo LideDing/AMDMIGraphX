@@ -2,11 +2,29 @@
 #include <migraphx/dfor.hpp>
 #include <migraphx/requires.hpp>
 #include <migraphx/shape_for_each.hpp>
+
+#ifndef MIGRAPHX_USE_BLAZE
+#define MIGRAPHX_USE_BLAZE 0
+#endif
+
+#if MIGRAPHX_USE_BLAZE
 #include <blaze/math/CustomMatrix.h>
+#endif
 
 namespace migraphx {
 inline namespace MIGRAPHX_INLINE_NS {
 namespace cpu {
+
+template <class T>
+struct is_fast_gemm_type : std::false_type
+{
+};
+
+#if MIGRAPHX_USE_BLAZE
+template <>
+struct is_fast_gemm_type<float> : std::true_type
+{
+};
 
 template <class T>
 using matrix = blaze::CustomMatrix<T, blaze::unaligned, blaze::unpadded>; // NOLINT
@@ -34,16 +52,6 @@ static void visit_mat(tensor_view<T> x, F f)
         f(mat);
 }
 
-template <class T>
-struct is_fast_gemm_type : std::false_type
-{
-};
-
-template <>
-struct is_fast_gemm_type<float> : std::true_type
-{
-};
-
 template <class T, class F>
 void migemm_impl(
     tensor_view<T> cmat, tensor_view<T> amat, tensor_view<T> bmat, F alpha, F beta, std::true_type)
@@ -61,7 +69,7 @@ void migemm_impl(
         });
     });
 }
-
+#endif
 template <class T, class F>
 void migemm_impl(
     tensor_view<T> cmat, tensor_view<T> amat, tensor_view<T> bmat, F alpha, F beta, std::false_type)
