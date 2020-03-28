@@ -87,11 +87,17 @@ migraphx::compile_options to_compile_options(const migraphx_compile_options& opt
     return result;
 }
 
-migraphx::onnx_options to_onnx_options(const migraphx_onnx_options& options)
+void set_batch_size(onnx_options& options, unsigned int batch_size)
 {
-    migraphx::onnx_options result{};
-    result.batch_size = options.batch_size;
-    return result;
+    options.batch_size = batch_size;
+}
+
+void add_parameter_shape(onnx_options& options,
+                         const char* name,
+                         std::size_t dim_num,
+                         const std::size_t* dims)
+{
+    options.map_input_dims[std::string(name)] = std::vector<std::size_t>(dims, dims + dim_num);
 }
 
 template <class Value>
@@ -221,6 +227,16 @@ struct migraphx_program
     {
     }
     migraphx::program object;
+};
+
+extern "C" struct migraphx_onnx_options;
+struct migraphx_onnx_options
+{
+    template <class... Ts>
+    migraphx_onnx_options(Ts&&... xs) : object(std::forward<Ts>(xs)...)
+    {
+    }
+    migraphx::onnx_options object;
 };
 
 extern "C" migraphx_status migraphx_shape_destroy(migraphx_shape_t shape)
@@ -574,25 +590,57 @@ migraphx_program_equal(bool* out, const_migraphx_program_t program, const_migrap
     });
 }
 
-extern "C" migraphx_status
-migraphx_parse_onnx(migraphx_program_t* out, const char* name, migraphx_onnx_options* options)
+extern "C" migraphx_status migraphx_onnx_options_destroy(migraphx_onnx_options_t onnx_options)
+{
+    return migraphx::try_([&] { destroy((onnx_options)); });
+}
+
+extern "C" migraphx_status migraphx_onnx_options_create(migraphx_onnx_options_t* onnx_options)
 {
     return migraphx::try_([&] {
-        *out = allocate<migraphx_program_t>(migraphx::parse_onnx(
-            (name),
-            (options == nullptr ? migraphx::onnx_options{} : migraphx::to_onnx_options(*options))));
+        *onnx_options = object_cast<migraphx_onnx_options_t>(allocate<migraphx::onnx_options>());
+    });
+}
+
+extern "C" migraphx_status migraphx_onnx_options_add_parameter_shape(
+    migraphx_onnx_options_t onnx_options, const char* name, std::size_t dim_num, std::size_t* dims)
+{
+    return migraphx::try_([&] {
+        if(onnx_options == nullptr)
+            MIGRAPHX_THROW(migraphx_status_bad_param, "Bad parameter onnx_options: Null pointer");
+        migraphx::add_parameter_shape((onnx_options->object), (name), (dim_num), (dims));
+    });
+}
+
+extern "C" migraphx_status
+migraphx_onnx_options_set_batch_size(migraphx_onnx_options_t onnx_options, unsigned int batch_size)
+{
+    return migraphx::try_([&] {
+        if(onnx_options == nullptr)
+            MIGRAPHX_THROW(migraphx_status_bad_param, "Bad parameter onnx_options: Null pointer");
+        migraphx::set_batch_size((onnx_options->object), (batch_size));
+    });
+}
+
+extern "C" migraphx_status
+migraphx_parse_onnx(migraphx_program_t* out, const char* name, migraphx_onnx_options_t options)
+{
+    return migraphx::try_([&] {
+        if(options == nullptr)
+            MIGRAPHX_THROW(migraphx_status_bad_param, "Bad parameter options: Null pointer");
+        *out = allocate<migraphx_program_t>(migraphx::parse_onnx((name), (options->object)));
     });
 }
 
 extern "C" migraphx_status migraphx_parse_onnx_buffer(migraphx_program_t* out,
                                                       const void* data,
                                                       size_t size,
-                                                      migraphx_onnx_options* options)
+                                                      migraphx_onnx_options_t options)
 {
     return migraphx::try_([&] {
-        *out = allocate<migraphx_program_t>(migraphx::parse_onnx_buffer(
-            (data),
-            (size),
-            (options == nullptr ? migraphx::onnx_options{} : migraphx::to_onnx_options(*options))));
+        if(options == nullptr)
+            MIGRAPHX_THROW(migraphx_status_bad_param, "Bad parameter options: Null pointer");
+        *out = allocate<migraphx_program_t>(
+            migraphx::parse_onnx_buffer((data), (size), (options->object)));
     });
 }

@@ -37,6 +37,7 @@ struct onnx_parser
     program prog            = program();
     bool is_pytorch         = false;
     unsigned int batch_size = 1;
+    std::unordered_map<std::string, std::vector<std::size_t>> map_input_dims;
 
     std::unordered_map<std::string, op_func> ops;
     std::unordered_map<std::string, operation> map_actv_funcs;
@@ -732,28 +733,56 @@ struct onnx_parser
     parse_slice(const std::string&, node_info info, std::vector<instruction_ref> args)
     {
         op::slice op;
-        std::vector<size_t> dims = args[0]->get_shape().lens();
-        size_t num_dims          = dims.size();
-        if(contains(info.attributes, "axes"))
+
+        // slice can have up to 5 inputs, we first check the 5th one
+        // to decide whether MIGRAPHX can handle this slice
+        if(args.size() == 5)
+        {
+            migraphx::argument step_arg = args.back()->eval();
+            check_arg_empty(step_arg, "PARSE_SLICE: cannot handle variable steps for slice");
+            std::vector<int> steps;
+            step_arg.visit([&](auto s) { steps.assign(s.begin(), s.end()); });
+            if(!std::all_of(steps.begin(), steps.end(), [](auto s) { return s == 1; }))
+            {
+                MIGRAPHX_THROW("PARSE_SLICE: cannot handle step other than 1");
+            }
+        }
+
+        if(args.size() >= 4)
+        {
+            migraphx::argument axes_arg = args.at(3)->eval();
+            check_arg_empty(axes_arg, "PARSE_SLICE: cannot handle variable axes for slice");
+            axes_arg.visit([&](auto s) { op.axes.assign(s.begin(), s.end()); });
+        }
+        else if(contains(info.attributes, "axes"))
         {
             literal s = parse_value(info.attributes.at("axes"));
             s.visit([&](auto v) { copy(v, std::back_inserter(op.axes)); });
         }
-        else
-        {
-            op.axes = std::vector<int64_t>(num_dims);
-            std::iota(op.axes.begin(), op.axes.end(), 0);
-        }
 
-        if(contains(info.attributes, "ends"))
+        if(args.size() >= 3)
+        {
+            migraphx::argument end_arg = args.at(2)->eval();
+            check_arg_empty(end_arg, "PARSE_SLICE: cannot handle variable ends for slice");
+            end_arg.visit([&](auto s) { op.ends.assign(s.begin(), s.end()); });
+        }
+        else if(contains(info.attributes, "ends"))
         {
             op.ends = get_indices(info.attributes.at("ends"));
         }
-        if(contains(info.attributes, "starts"))
+
+        if(args.size() >= 2)
+        {
+            migraphx::argument start_arg = args.at(1)->eval();
+            check_arg_empty(start_arg, "PARSE_SLICE: cannot handle variable starts for slice");
+            start_arg.visit([&](auto s) { op.starts.assign(s.begin(), s.end()); });
+        }
+        else if(contains(info.attributes, "starts"))
         {
             literal s = parse_value(info.attributes.at("starts"));
             s.visit([&](auto v) { copy(v, std::back_inserter(op.starts)); });
         }
+
         return prog.add_instruction(op, args[0]);
     }
 
@@ -1035,26 +1064,56 @@ struct onnx_parser
     instruction_ref parse_pad(const std::string&, node_info info, std::vector<instruction_ref> args)
     {
         std::vector<int64_t> pads{};
-        float value = 0.0f;
-        if(contains(info.attributes, "pads"))
+        if(args.size() >= 2)
+        {
+            auto pad_arg = args.at(1)->eval();
+            check_arg_empty(pad_arg, "PARSE_PAD: pad input must be constant");
+            pad_arg.visit([&](auto v) { pads.assign(v.begin(), v.end()); });
+        }
+        else if(contains(info.attributes, "pads"))
         {
             auto&& pad_vals = info.attributes["pads"].ints();
             pads            = std::vector<int64_t>(pad_vals.begin(), pad_vals.end());
         }
+        else
+        {
+            MIGRAPHX_THROW("PARSE_PAD: pad must be available");
+        }
+
         // check if padding is actually being done (at least one value is nonzero)
         if(std::all_of(pads.begin(), pads.end(), [](const int& i) { return i == 0; }))
         {
             return prog.add_instruction(migraphx::op::identity{}, args.front());
         }
-        if(contains(info.attributes, "value"))
+
+        float value = 0.0f;
+        // third input is the value
+        if(args.size() == 3)
+        {
+            auto val_ins = args.at(2);
+            if(!val_ins->can_eval())
+            {
+                MIGRAPHX_THROW("PARSE_PAD: input value must be constant");
+            }
+            auto val_arg = val_ins->eval();
+            if(val_arg.get_shape().elements() != 1)
+            {
+                MIGRAPHX_THROW("PARSE_PAD: value should contain only one element");
+            }
+            value = val_arg.at<float>();
+        }
+        else if(contains(info.attributes, "value"))
         {
             value = parse_value(info.attributes.at("value")).at<float>();
         }
+
         if(contains(info.attributes, "mode"))
         {
             auto mode = info.attributes.at("mode").s();
             if(mode != "constant")
-                MIGRAPHX_THROW("migraphx currently only supports constant padding");
+            {
+                MIGRAPHX_THROW("PARSE_PAD: migraphx currently only supports constant padding");
+            }
         }
         return prog.add_instruction(migraphx::op::pad{pads, value}, args.front());
     }
@@ -1784,8 +1843,14 @@ struct onnx_parser
             // input not in initializer_data, so it is a real input
             if(!contains(instructions, name))
             {
+                std::vector<std::size_t> dims;
+                if(map_input_dims.count(name) > 0)
+                {
+                    dims = map_input_dims.at(name);
+                }
+
                 // TODO: Get shape of input parameter
-                shape s            = parse_type(input.type(), batch_size);
+                shape s            = parse_type(input.type(), dims, batch_size);
                 instructions[name] = prog.add_parameter(name, s);
             }
         }
@@ -2031,7 +2096,9 @@ struct onnx_parser
         return literal{{shape_type, dims}, data.begin(), data.end()};
     }
 
-    static shape parse_type(const onnx::TypeProto& t, const unsigned int batch_size)
+    static shape parse_type(const onnx::TypeProto& t,
+                            std::vector<std::size_t> input_dims,
+                            unsigned int batch_size)
     {
         shape::type_t shape_type{};
         switch(t.tensor_type().elem_type())
@@ -2056,18 +2123,37 @@ struct onnx_parser
         }
         std::vector<std::size_t> dims;
         auto&& tensor_dims = t.tensor_type().shape().dim();
+        // no input dims for a parameter, use 0 as a placeholder
+        if(input_dims.empty() and !tensor_dims.empty())
+        {
+            input_dims.resize(tensor_dims.size(), 0);
+        }
+        assert(input_dims.size() == tensor_dims.size());
+
         std::transform(tensor_dims.begin(),
                        tensor_dims.end(),
+                       input_dims.begin(),
                        std::back_inserter(dims),
-                       [&](auto&& d) -> std::size_t {
-                           if(d.has_dim_value())
+                       [&](auto&& d, auto v) -> std::size_t {
+                           // input dims has priority than existing dims
+                           if(v > 0)
+                           {
+                               return v;
+                           }
+                           else if(d.has_dim_value())
                            {
                                if(static_cast<int>(d.dim_value()) <= 0)
+                               {
                                    return batch_size;
+                               }
                                return d.dim_value();
                            }
-                           return batch_size;
+                           else
+                           {
+                               return batch_size;
+                           }
                        });
+
         if(dims.empty())
             return {shape_type};
 
@@ -2106,10 +2192,12 @@ struct onnx_parser
 };
 
 template <class... Ts>
-program parse_onnx_from(onnx_options options, Ts&&... xs)
+program parse_onnx_from(const onnx_options& options, Ts&&... xs)
 {
     onnx_parser parser;
-    parser.batch_size = options.batch_size;
+    parser.map_input_dims = options.map_input_dims;
+    parser.batch_size     = options.batch_size;
+
 #ifndef NDEBUG
     // Log the program when it can't be parsed
     try
@@ -2127,18 +2215,18 @@ program parse_onnx_from(onnx_options options, Ts&&... xs)
     return std::move(parser.prog);
 }
 
-program parse_onnx(const std::string& name, onnx_options options)
+program parse_onnx(const std::string& name, const onnx_options& options)
 {
     std::fstream input(name.c_str(), std::ios::in | std::ios::binary);
     return parse_onnx_from(options, input);
 }
 
-program parse_onnx_buffer(const std::string& buffer, onnx_options options)
+program parse_onnx_buffer(const std::string& buffer, const onnx_options& options)
 {
     return parse_onnx_from(options, buffer.data(), buffer.size());
 }
 
-program parse_onnx_buffer(const void* data, std::size_t size, onnx_options options)
+program parse_onnx_buffer(const void* data, std::size_t size, const onnx_options& options)
 {
     return parse_onnx_from(options, data, size);
 }
