@@ -355,7 +355,7 @@ void simplify_algebra::apply(program& p) const
                             find_inner_broadcast{},
                             find_double_add_lit_broadcast{},
                             find_add_lit_broadcast{},
-                            //find_add_convs{},
+                            // find_add_convs{},
                             find_mul_conv{},
                             find_mul_add{},
                             find_concat_unary{},
