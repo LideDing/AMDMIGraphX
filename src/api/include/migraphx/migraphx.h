@@ -173,13 +173,12 @@ migraphx_status migraphx_onnx_options_destroy(migraphx_onnx_options_t onnx_optio
 
 migraphx_status migraphx_onnx_options_create(migraphx_onnx_options_t* onnx_options);
 
-migraphx_status migraphx_onnx_options_add_parameter_shape(migraphx_onnx_options_t onnx_options,
-                                                          const char* name,
-                                                          size_t dim_num,
-                                                          size_t* dims);
+migraphx_status migraphx_onnx_options_add_dim_value(migraphx_onnx_options_t onnx_options,
+                                                    const char* name,
+                                                    unsigned int dim_value);
 
-migraphx_status migraphx_onnx_options_set_batch_size(migraphx_onnx_options_t onnx_options,
-                                                     unsigned int batch_size);
+migraphx_status migraphx_onnx_options_set_default_dim_value(migraphx_onnx_options_t onnx_options,
+                                                            size_t value);
 
 migraphx_status
 migraphx_parse_onnx(migraphx_program_t* out, const char* name, migraphx_onnx_options_t options);

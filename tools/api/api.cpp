@@ -87,17 +87,14 @@ migraphx::compile_options to_compile_options(const migraphx_compile_options& opt
     return result;
 }
 
-void set_batch_size(onnx_options& options, unsigned int batch_size)
+void set_default_dim_value(onnx_options& options, size_t value)
 {
-    options.batch_size = batch_size;
+    options.default_dim_value = value;
 }
 
-void add_parameter_shape(onnx_options& options,
-                         const char* name,
-                         std::size_t dim_num,
-                         const std::size_t* dims)
+void add_dim_value(onnx_options& options, const char* name, std::size_t dim_value)
 {
-    options.map_input_dims[std::string(name)] = std::vector<std::size_t>(dims, dims + dim_num);
+    options.map_dim_param_values[std::string(name)] = dim_value;
 }
 
 template <class Value>

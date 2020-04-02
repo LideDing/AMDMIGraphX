@@ -814,19 +814,48 @@ TEST_CASE(implicit_add_bcast_test)
     EXPECT(p == prog);
 }
 
-TEST_CASE(implicit_add_bcast_user_input_shape_test)
+TEST_CASE(implicit_add_bcast_var_default_test)
 {
     migraphx::program p;
-    auto l0 = p.add_parameter("0", migraphx::shape{migraphx::shape::float_type, {3, 4, 5, 6}});
-    auto l1 = p.add_parameter("1", migraphx::shape{migraphx::shape::float_type, {4, 5, 1}});
-    auto l3 = p.add_instruction(migraphx::op::multibroadcast{{3, 4, 5, 6}}, l1);
+    auto l0 = p.add_parameter("0", migraphx::shape{migraphx::shape::float_type, {2, 1, 4, 5}});
+    auto l1 = p.add_parameter("1", migraphx::shape{migraphx::shape::float_type, {1, 4, 1}});
+    auto l3 = p.add_instruction(migraphx::op::multibroadcast{{2, 1, 4, 5}}, l1);
+    auto r  = p.add_instruction(migraphx::op::add{}, l0, l3);
+    p.add_return({r});
+
+    auto prog = migraphx::parse_onnx("implicit_add_bcast_var_len_test.onnx");
+
+    EXPECT(p == prog);
+}
+
+TEST_CASE(implicit_add_bcast_var_len3_test)
+{
+    migraphx::program p;
+    auto l0 = p.add_parameter("0", migraphx::shape{migraphx::shape::float_type, {2, 3, 4, 5}});
+    auto l1 = p.add_parameter("1", migraphx::shape{migraphx::shape::float_type, {3, 4, 1}});
+    auto l3 = p.add_instruction(migraphx::op::multibroadcast{{2, 3, 4, 5}}, l1);
     auto r  = p.add_instruction(migraphx::op::add{}, l0, l3);
     p.add_return({r});
 
     migraphx::onnx_options options;
-    options.map_input_dims["0"] = {3, 4, 5, 6};
-    options.map_input_dims["1"] = {4, 5, 1};
-    auto prog                   = migraphx::parse_onnx("implicit_add_bcast_test.onnx", options);
+    options.map_dim_param_values["batch"] = 3;
+    auto prog = migraphx::parse_onnx("implicit_add_bcast_var_len_test.onnx", options);
+
+    EXPECT(p == prog);
+}
+
+TEST_CASE(implicit_add_bcast_var_len2_test)
+{
+    migraphx::program p;
+    auto l0 = p.add_parameter("0", migraphx::shape{migraphx::shape::float_type, {2, 2, 4, 5}});
+    auto l1 = p.add_parameter("1", migraphx::shape{migraphx::shape::float_type, {2, 4, 1}});
+    auto l3 = p.add_instruction(migraphx::op::multibroadcast{{2, 2, 4, 5}}, l1);
+    auto r  = p.add_instruction(migraphx::op::add{}, l0, l3);
+    p.add_return({r});
+
+    migraphx::onnx_options options;
+    options.map_dim_param_values["batch"] = 2;
+    auto prog = migraphx::parse_onnx("implicit_add_bcast_var_len_test.onnx", options);
 
     EXPECT(p == prog);
 }
@@ -1634,7 +1663,7 @@ TEST_CASE(variable_batch_user_input_test)
     p.add_return({r});
 
     migraphx::onnx_options options;
-    options.batch_size = 2;
+    options.default_dim_value = 2;
 
     auto prog = migraphx::parse_onnx("variable_batch_test.onnx", options);
 

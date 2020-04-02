@@ -490,18 +490,14 @@ struct onnx_options : MIGRAPHX_HANDLE_BASE(onnx_options)
 
     onnx_options(migraphx_onnx_options* p, borrow) { this->set_handle(p, borrow{}); }
 
-    void add_parameter_shape(const std::string& name, std::vector<std::size_t> dim)
+    void add_dim_param_value(const std::string& name, std::size_t value)
     {
-        call(&migraphx_onnx_options_add_parameter_shape,
-             this->get_handle_ptr(),
-             name.c_str(),
-             dim.size(),
-             dim.data());
+        call(&migraphx_onnx_options_add_dim_value, this->get_handle_ptr(), name.c_str(), value);
     }
 
-    void set_batch_size(unsigned int batch_size)
+    void set_default_dim_value(size_t value)
     {
-        call(&migraphx_onnx_options_set_batch_size, this->get_handle_ptr(), batch_size);
+        call(&migraphx_onnx_options_set_default_dim_value, this->get_handle_ptr(), value);
     }
 };
 

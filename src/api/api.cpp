@@ -87,17 +87,14 @@ migraphx::compile_options to_compile_options(const migraphx_compile_options& opt
     return result;
 }
 
-void set_batch_size(onnx_options& options, unsigned int batch_size)
+void set_default_dim_value(onnx_options& options, size_t value)
 {
-    options.batch_size = batch_size;
+    options.default_dim_value = value;
 }
 
-void add_parameter_shape(onnx_options& options,
-                         const char* name,
-                         std::size_t dim_num,
-                         const std::size_t* dims)
+void add_dim_value(onnx_options& options, const char* name, std::size_t dim_value)
 {
-    options.map_input_dims[std::string(name)] = std::vector<std::size_t>(dims, dims + dim_num);
+    options.map_dim_param_values[std::string(name)] = dim_value;
 }
 
 template <class Value>
@@ -602,23 +599,24 @@ extern "C" migraphx_status migraphx_onnx_options_create(migraphx_onnx_options_t*
     });
 }
 
-extern "C" migraphx_status migraphx_onnx_options_add_parameter_shape(
-    migraphx_onnx_options_t onnx_options, const char* name, size_t dim_num, size_t* dims)
+extern "C" migraphx_status migraphx_onnx_options_add_dim_value(migraphx_onnx_options_t onnx_options,
+                                                               const char* name,
+                                                               unsigned int dim_value)
 {
     return migraphx::try_([&] {
         if(onnx_options == nullptr)
             MIGRAPHX_THROW(migraphx_status_bad_param, "Bad parameter onnx_options: Null pointer");
-        migraphx::add_parameter_shape((onnx_options->object), (name), (dim_num), (dims));
+        migraphx::add_dim_value((onnx_options->object), (name), (dim_value));
     });
 }
 
 extern "C" migraphx_status
-migraphx_onnx_options_set_batch_size(migraphx_onnx_options_t onnx_options, unsigned int batch_size)
+migraphx_onnx_options_set_default_dim_value(migraphx_onnx_options_t onnx_options, size_t value)
 {
     return migraphx::try_([&] {
         if(onnx_options == nullptr)
             MIGRAPHX_THROW(migraphx_status_bad_param, "Bad parameter onnx_options: Null pointer");
-        migraphx::set_batch_size((onnx_options->object), (batch_size));
+        migraphx::set_default_dim_value((onnx_options->object), (value));
     });
 }
 
